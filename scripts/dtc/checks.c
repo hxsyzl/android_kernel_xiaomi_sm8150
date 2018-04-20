@@ -714,11 +714,9 @@ static void check_pci_bridge(struct check *c, struct dt_info *dti, struct node *
 			     node->fullpath);
 
 	prop = get_property(node, "bus-range");
-	if (!prop) {
-		FAIL(c, dti, "Node %s missing bus-range for PCI bridge",
-			     node->fullpath);
+	if (!prop)
 		return;
-	}
+
 	if (prop->val.len != (sizeof(cell_t) * 2)) {
 		FAIL(c, dti, "Node %s bus-range must be 2 cells",
 			     node->fullpath);

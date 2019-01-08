@@ -1922,4 +1922,12 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 unsigned long sched_cpu_util(int cpu);
 #endif /* CONFIG_SMP */
 
+void __exit_umh(struct task_struct *tsk);
+
+static inline void exit_umh(struct task_struct *tsk)
+{
+	if (unlikely(tsk->flags & PF_UMH))
+		__exit_umh(tsk);
+}
+
 #endif

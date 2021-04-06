@@ -49,6 +49,7 @@ struct blk_mq_hw_ctx {
 	unsigned int		queue_num;
 
 	atomic_t		nr_active;
+	unsigned int		nr_expired;
 
 	struct hlist_node	cpuhp_dead;
 	struct kobject		kobj;
@@ -63,7 +64,7 @@ struct blk_mq_hw_ctx {
 #endif
 
 	/* Must be the last member - see also blk_mq_hw_ctx_size(). */
-	struct srcu_struct	queue_rq_srcu[0];
+	struct srcu_struct	srcu[0];
 };
 
 struct blk_mq_tag_set {
@@ -162,7 +163,13 @@ enum {
 	BLK_MQ_F_TAG_SHARED	= 1 << 1,
 	BLK_MQ_F_SG_MERGE	= 1 << 2,
 	BLK_MQ_F_BLOCKING	= 1 << 5,
+	/* Do not allow an I/O scheduler to be configured. */
 	BLK_MQ_F_NO_SCHED	= 1 << 6,
+	/*
+	 * Select 'none' during queue registration in case of a single hwq
+	 * or shared hwqs instead of 'mq-deadline'.
+	 */
+	BLK_MQ_F_NO_SCHED_BY_DEFAULT	= 1 << 7,
 	BLK_MQ_F_ALLOC_POLICY_START_BIT = 8,
 	BLK_MQ_F_ALLOC_POLICY_BITS = 1,
 
@@ -170,7 +177,6 @@ enum {
 	BLK_MQ_S_TAG_ACTIVE	= 1,
 	BLK_MQ_S_SCHED_RESTART	= 2,
 	BLK_MQ_S_TAG_WAITING	= 3,
-	BLK_MQ_S_START_ON_RUN	= 4,
 
 	BLK_MQ_MAX_DEPTH	= 10240,
 
@@ -249,9 +255,8 @@ void blk_mq_start_stopped_hw_queues(struct request_queue *q, bool async);
 void blk_mq_quiesce_queue(struct request_queue *q);
 void blk_mq_unquiesce_queue(struct request_queue *q);
 void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs);
-void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
+bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
 void blk_mq_run_hw_queues(struct request_queue *q, bool async);
-void blk_mq_delay_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs);
 void blk_mq_tagset_busy_iter(struct blk_mq_tag_set *tagset,
 		busy_tag_iter_fn *fn, void *priv);
 bool blk_mq_freeze_queue(struct request_queue *q);

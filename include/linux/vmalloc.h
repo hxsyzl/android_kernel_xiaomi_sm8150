@@ -51,12 +51,22 @@ struct vm_struct {
 struct vmap_area {
 	unsigned long va_start;
 	unsigned long va_end;
-	unsigned long flags;
+
 	struct rb_node rb_node;         /* address sorted rbtree */
 	struct list_head list;          /* address sorted list */
-	struct llist_node purge_list;    /* "lazy purge" list */
-	struct vm_struct *vm;
-	struct rcu_head rcu_head;
+
+	/*
+	 * The following three variables can be packed, because
+	 * a vmap_area object is always one of the three states:
+	 *    1) in "free" tree (root is vmap_area_root)
+	 *    2) in "busy" tree (root is free_vmap_area_root)
+	 *    3) in purge list  (head is vmap_purge_list)
+	 */
+	union {
+		unsigned long subtree_max_size; /* in "free" tree */
+		struct vm_struct *vm;           /* in "busy" tree */
+		struct llist_node purge_list;   /* in purge list */
+	};
 };
 
 /*
@@ -192,13 +202,6 @@ extern long vwrite(char *buf, char *addr, unsigned long count);
 extern struct list_head vmap_area_list;
 extern __init void vm_area_add_early(struct vm_struct *vm);
 extern __init void vm_area_register_early(struct vm_struct *vm, size_t align);
-extern __init int vm_area_check_early(struct vm_struct *vm);
-#ifdef CONFIG_ENABLE_VMALLOC_SAVING
-extern void mark_vmalloc_reserved_area(void *addr, unsigned long size);
-#else
-static inline void mark_vmalloc_reserved_area(void *addr, unsigned long size)
-{ };
-#endif
 
 #ifdef CONFIG_SMP
 # ifdef CONFIG_MMU
@@ -224,12 +227,7 @@ pcpu_free_vm_areas(struct vm_struct **vms, int nr_vms)
 #endif
 
 #ifdef CONFIG_MMU
-#ifdef CONFIG_ENABLE_VMALLOC_SAVING
-extern unsigned long total_vmalloc_size;
-#define VMALLOC_TOTAL total_vmalloc_size
-#else
 #define VMALLOC_TOTAL (VMALLOC_END - VMALLOC_START)
-#endif
 #else
 #define VMALLOC_TOTAL 0UL
 #endif

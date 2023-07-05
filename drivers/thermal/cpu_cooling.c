@@ -565,7 +565,9 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 				 unsigned long state)
 {
 	struct cpufreq_cooling_device *cpufreq_cdev = cdev->devdata;
+	struct cpumask *cpus;
 	unsigned int clip_freq;
+	unsigned long max_capacity, capacity;
 	int cpu = cpufreq_cdev->policy->cpu;
 
 	/* Request state should be less than max_level */
@@ -584,11 +586,15 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 	cpufreq_cdev->cpufreq_state = state;
 	cpufreq_cdev->clipped_freq = clip_freq;
 
-#ifdef CONFIG_MACH_XIAOMI_SM8150
 	get_online_cpus();
 	cpufreq_update_policy(cpu);
 	put_online_cpus();
-#else
+	cpus = cpufreq_cdev->policy->related_cpus;
+	max_capacity = arch_scale_cpu_capacity(NULL, cpumask_first(cpus));
+	capacity = clip_freq * max_capacity;
+	capacity /= cpufreq_cdev->policy->cpuinfo.max_freq;
+	arch_set_thermal_pressure(cpus, max_capacity - capacity);
+
 	/* Check if the device has a platform mitigation function that
 	 * can handle the CPU freq mitigation, if not, notify cpufreq
 	 * framework.

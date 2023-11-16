@@ -14,6 +14,8 @@
 #include <linux/delay.h>
 #include <linux/freezer.h>
 #include <linux/sched/signal.h>
+#include <linux/random.h>
+#include <uapi/linux/sched/types.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -124,6 +126,7 @@ next:
 
 int f2fs_start_gc_thread(struct f2fs_sb_info *sbi)
 {
+	const struct sched_param param = { .sched_priority = 0 };
 	struct f2fs_gc_kthread *gc_th;
 	dev_t dev = sbi->sb->s_bdev->bd_dev;
 	int err = 0;
@@ -131,7 +134,7 @@ int f2fs_start_gc_thread(struct f2fs_sb_info *sbi)
 	gc_th = f2fs_kmalloc(sbi, sizeof(struct f2fs_gc_kthread), GFP_KERNEL);
 	if (!gc_th) {
 		err = -ENOMEM;
-		goto out;
+		return err;
 	}
 
 	gc_th->urgent_sleep_time = DEF_GC_THREAD_URGENT_SLEEP_TIME;
@@ -149,8 +152,12 @@ int f2fs_start_gc_thread(struct f2fs_sb_info *sbi)
 		err = PTR_ERR(gc_th->f2fs_gc_task);
 		kvfree(gc_th);
 		sbi->gc_thread = NULL;
+		return err;
 	}
-out:
+	sched_setscheduler(sbi->gc_thread->f2fs_gc_task, SCHED_IDLE, &param);
+	set_task_ioprio(sbi->gc_thread->f2fs_gc_task,
+			IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0));
+
 	return err;
 }
 
@@ -304,6 +311,348 @@ static unsigned int count_bits(const unsigned long *addr,
 	return sum;
 }
 
+static bool f2fs_check_victim_tree(struct f2fs_sb_info *sbi,
+				struct rb_root_cached *root)
+{
+#ifdef CONFIG_F2FS_CHECK_FS
+	struct rb_node *cur = rb_first_cached(root), *next;
+	struct victim_entry *cur_ve, *next_ve;
+
+	while (cur) {
+		next = rb_next(cur);
+		if (!next)
+			return true;
+
+		cur_ve = rb_entry(cur, struct victim_entry, rb_node);
+		next_ve = rb_entry(next, struct victim_entry, rb_node);
+
+		if (cur_ve->mtime > next_ve->mtime) {
+			f2fs_info(sbi, "broken victim_rbtree, "
+				"cur_mtime(%llu) next_mtime(%llu)",
+				cur_ve->mtime, next_ve->mtime);
+			return false;
+		}
+		cur = next;
+	}
+#endif
+	return true;
+}
+
+static struct victim_entry *__lookup_victim_entry(struct f2fs_sb_info *sbi,
+					unsigned long long mtime)
+{
+	struct atgc_management *am = &sbi->am;
+	struct rb_node *node = am->root.rb_root.rb_node;
+	struct victim_entry *ve = NULL;
+
+	while (node) {
+		ve = rb_entry(node, struct victim_entry, rb_node);
+
+		if (mtime < ve->mtime)
+			node = node->rb_left;
+		else
+			node = node->rb_right;
+	}
+	return ve;
+}
+
+static struct victim_entry *__create_victim_entry(struct f2fs_sb_info *sbi,
+		unsigned long long mtime, unsigned int segno)
+{
+	struct atgc_management *am = &sbi->am;
+	struct victim_entry *ve;
+
+	ve =  f2fs_kmem_cache_alloc(victim_entry_slab, GFP_NOFS, true, NULL);
+
+	ve->mtime = mtime;
+	ve->segno = segno;
+
+	list_add_tail(&ve->list, &am->victim_list);
+	am->victim_count++;
+
+	return ve;
+}
+
+static void __insert_victim_entry(struct f2fs_sb_info *sbi,
+				unsigned long long mtime, unsigned int segno)
+{
+	struct atgc_management *am = &sbi->am;
+	struct rb_root_cached *root = &am->root;
+	struct rb_node **p = &root->rb_root.rb_node;
+	struct rb_node *parent = NULL;
+	struct victim_entry *ve;
+	bool left_most = true;
+
+	/* look up rb tree to find parent node */
+	while (*p) {
+		parent = *p;
+		ve = rb_entry(parent, struct victim_entry, rb_node);
+
+		if (mtime < ve->mtime) {
+			p = &(*p)->rb_left;
+		} else {
+			p = &(*p)->rb_right;
+			left_most = false;
+		}
+	}
+
+	ve = __create_victim_entry(sbi, mtime, segno);
+
+	rb_link_node(&ve->rb_node, parent, p);
+	rb_insert_color_cached(&ve->rb_node, root, left_most);
+}
+
+static void add_victim_entry(struct f2fs_sb_info *sbi,
+				struct victim_sel_policy *p, unsigned int segno)
+{
+	struct sit_info *sit_i = SIT_I(sbi);
+	unsigned int secno = GET_SEC_FROM_SEG(sbi, segno);
+	unsigned int start = GET_SEG_FROM_SEC(sbi, secno);
+	unsigned long long mtime = 0;
+	unsigned int i;
+
+	if (unlikely(is_sbi_flag_set(sbi, SBI_CP_DISABLED))) {
+		if (p->gc_mode == GC_AT &&
+			get_valid_blocks(sbi, segno, true) == 0)
+			return;
+	}
+
+	for (i = 0; i < sbi->segs_per_sec; i++)
+		mtime += get_seg_entry(sbi, start + i)->mtime;
+	mtime = div_u64(mtime, sbi->segs_per_sec);
+
+	/* Handle if the system time has changed by the user */
+	if (mtime < sit_i->min_mtime)
+		sit_i->min_mtime = mtime;
+	if (mtime > sit_i->max_mtime)
+		sit_i->max_mtime = mtime;
+	if (mtime < sit_i->dirty_min_mtime)
+		sit_i->dirty_min_mtime = mtime;
+	if (mtime > sit_i->dirty_max_mtime)
+		sit_i->dirty_max_mtime = mtime;
+
+	/* don't choose young section as candidate */
+	if (sit_i->dirty_max_mtime - mtime < p->age_threshold)
+		return;
+
+	__insert_victim_entry(sbi, mtime, segno);
+}
+
+static void atgc_lookup_victim(struct f2fs_sb_info *sbi,
+						struct victim_sel_policy *p)
+{
+	struct sit_info *sit_i = SIT_I(sbi);
+	struct atgc_management *am = &sbi->am;
+	struct rb_root_cached *root = &am->root;
+	struct rb_node *node;
+	struct victim_entry *ve;
+	unsigned long long total_time;
+	unsigned long long age, u, accu;
+	unsigned long long max_mtime = sit_i->dirty_max_mtime;
+	unsigned long long min_mtime = sit_i->dirty_min_mtime;
+	unsigned int sec_blocks = CAP_BLKS_PER_SEC(sbi);
+	unsigned int vblocks;
+	unsigned int dirty_threshold = max(am->max_candidate_count,
+					am->candidate_ratio *
+					am->victim_count / 100);
+	unsigned int age_weight = am->age_weight;
+	unsigned int cost;
+	unsigned int iter = 0;
+
+	if (max_mtime < min_mtime)
+		return;
+
+	max_mtime += 1;
+	total_time = max_mtime - min_mtime;
+
+	accu = div64_u64(ULLONG_MAX, total_time);
+	accu = min_t(unsigned long long, div_u64(accu, 100),
+					DEFAULT_ACCURACY_CLASS);
+
+	node = rb_first_cached(root);
+next:
+	ve = rb_entry_safe(node, struct victim_entry, rb_node);
+	if (!ve)
+		return;
+
+	if (ve->mtime >= max_mtime || ve->mtime < min_mtime)
+		goto skip;
+
+	/* age = 10000 * x% * 60 */
+	age = div64_u64(accu * (max_mtime - ve->mtime), total_time) *
+								age_weight;
+
+	vblocks = get_valid_blocks(sbi, ve->segno, true);
+	f2fs_bug_on(sbi, !vblocks || vblocks == sec_blocks);
+
+	/* u = 10000 * x% * 40 */
+	u = div64_u64(accu * (sec_blocks - vblocks), sec_blocks) *
+							(100 - age_weight);
+
+	f2fs_bug_on(sbi, age + u >= UINT_MAX);
+
+	cost = UINT_MAX - (age + u);
+	iter++;
+
+	if (cost < p->min_cost ||
+			(cost == p->min_cost && age > p->oldest_age)) {
+		p->min_cost = cost;
+		p->oldest_age = age;
+		p->min_segno = ve->segno;
+	}
+skip:
+	if (iter < dirty_threshold) {
+		node = rb_next(node);
+		goto next;
+	}
+}
+
+/*
+ * select candidates around source section in range of
+ * [target - dirty_threshold, target + dirty_threshold]
+ */
+static void atssr_lookup_victim(struct f2fs_sb_info *sbi,
+						struct victim_sel_policy *p)
+{
+	struct sit_info *sit_i = SIT_I(sbi);
+	struct atgc_management *am = &sbi->am;
+	struct victim_entry *ve;
+	unsigned long long age;
+	unsigned long long max_mtime = sit_i->dirty_max_mtime;
+	unsigned long long min_mtime = sit_i->dirty_min_mtime;
+	unsigned int seg_blocks = sbi->blocks_per_seg;
+	unsigned int vblocks;
+	unsigned int dirty_threshold = max(am->max_candidate_count,
+					am->candidate_ratio *
+					am->victim_count / 100);
+	unsigned int cost, iter;
+	int stage = 0;
+
+	if (max_mtime < min_mtime)
+		return;
+	max_mtime += 1;
+next_stage:
+	iter = 0;
+	ve = __lookup_victim_entry(sbi, p->age);
+next_node:
+	if (!ve) {
+		if (stage++ == 0)
+			goto next_stage;
+		return;
+	}
+
+	if (ve->mtime >= max_mtime || ve->mtime < min_mtime)
+		goto skip_node;
+
+	age = max_mtime - ve->mtime;
+
+	vblocks = get_seg_entry(sbi, ve->segno)->ckpt_valid_blocks;
+	f2fs_bug_on(sbi, !vblocks);
+
+	/* rare case */
+	if (vblocks == seg_blocks)
+		goto skip_node;
+
+	iter++;
+
+	age = max_mtime - abs(p->age - age);
+	cost = UINT_MAX - vblocks;
+
+	if (cost < p->min_cost ||
+			(cost == p->min_cost && age > p->oldest_age)) {
+		p->min_cost = cost;
+		p->oldest_age = age;
+		p->min_segno = ve->segno;
+	}
+skip_node:
+	if (iter < dirty_threshold) {
+		ve = rb_entry(stage == 0 ? rb_prev(&ve->rb_node) :
+					rb_next(&ve->rb_node),
+					struct victim_entry, rb_node);
+		goto next_node;
+	}
+
+	if (stage++ == 0)
+		goto next_stage;
+}
+
+static void lookup_victim_by_age(struct f2fs_sb_info *sbi,
+						struct victim_sel_policy *p)
+{
+	f2fs_bug_on(sbi, !f2fs_check_victim_tree(sbi, &sbi->am.root));
+
+	if (p->gc_mode == GC_AT)
+		atgc_lookup_victim(sbi, p);
+	else if (p->alloc_mode == AT_SSR)
+		atssr_lookup_victim(sbi, p);
+	else
+		f2fs_bug_on(sbi, 1);
+}
+
+static void release_victim_entry(struct f2fs_sb_info *sbi)
+{
+	struct atgc_management *am = &sbi->am;
+	struct victim_entry *ve, *tmp;
+
+	list_for_each_entry_safe(ve, tmp, &am->victim_list, list) {
+		list_del(&ve->list);
+		kmem_cache_free(victim_entry_slab, ve);
+		am->victim_count--;
+	}
+
+	am->root = RB_ROOT_CACHED;
+
+	f2fs_bug_on(sbi, am->victim_count);
+	f2fs_bug_on(sbi, !list_empty(&am->victim_list));
+}
+
+static bool f2fs_pin_section(struct f2fs_sb_info *sbi, unsigned int segno)
+{
+	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+	unsigned int secno = GET_SEC_FROM_SEG(sbi, segno);
+
+	if (!dirty_i->enable_pin_section)
+		return false;
+	if (!test_and_set_bit(secno, dirty_i->pinned_secmap))
+		dirty_i->pinned_secmap_cnt++;
+	return true;
+}
+
+static bool f2fs_pinned_section_exists(struct dirty_seglist_info *dirty_i)
+{
+	return dirty_i->pinned_secmap_cnt;
+}
+
+static bool f2fs_section_is_pinned(struct dirty_seglist_info *dirty_i,
+						unsigned int secno)
+{
+	return dirty_i->enable_pin_section &&
+		f2fs_pinned_section_exists(dirty_i) &&
+		test_bit(secno, dirty_i->pinned_secmap);
+}
+
+static void f2fs_unpin_all_sections(struct f2fs_sb_info *sbi, bool enable)
+{
+	unsigned int bitmap_size = f2fs_bitmap_size(MAIN_SECS(sbi));
+
+	if (f2fs_pinned_section_exists(DIRTY_I(sbi))) {
+		memset(DIRTY_I(sbi)->pinned_secmap, 0, bitmap_size);
+		DIRTY_I(sbi)->pinned_secmap_cnt = 0;
+	}
+	DIRTY_I(sbi)->enable_pin_section = enable;
+}
+
+static int f2fs_gc_pinned_control(struct inode *inode, int gc_type,
+							unsigned int segno)
+{
+	if (!f2fs_is_pinned_file(inode))
+		return 0;
+	if (gc_type != FG_GC)
+		return -EBUSY;
+	if (!f2fs_pin_section(F2FS_I_SB(inode), segno))
+		f2fs_pin_file_control(inode, true);
+	return -EAGAIN;
+}
 /*
  * This function is called from two paths.
  * One is garbage collection and the other is SSR segment selection.

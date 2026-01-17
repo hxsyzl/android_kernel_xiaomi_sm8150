@@ -4,6 +4,7 @@
 #include <linux/types.h>
 #include <linux/cgroup.h>
 #include <linux/freezer.h>
+#include <linux/sched/jobctl.h>
 #include <uapi/linux/android/binder.h>
 
 enum report_type {

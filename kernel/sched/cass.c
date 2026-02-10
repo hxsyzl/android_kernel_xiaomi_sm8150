@@ -63,7 +63,7 @@ void cass_cpu_util(struct cass_cpu_cand *c, int this_cpu, bool sync)
 		c->util -= min(c->util, task_util(current));
 
 	/* Get the utilization of everything other than CFS tasks */
-	c->hard_util = cpu_util_rt(c->cpu) + cpu_util_irq(c->cpu);
+	c->hard_util = cpu_util_rt(cpu_rq(c->cpu)) + cpu_util_irq(cpu_rq(c->cpu));
 
 	/*
 	 * Account for lost capacity due to time spent in RT/DL tasks and IRQs.
@@ -190,7 +190,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 		struct rq *rq = cpu_rq(cpu);
 
 		/* Get the original, maximum _possible_ capacity of this CPU */
-		curr->cap_orig = arch_scale_cpu_capacity(cpu);
+		curr->cap_orig = arch_scale_cpu_capacity(NULL, cpu);
 
 		/* Get the _current_, throttled maximum capacity of this CPU */
 		curr->cap_max = curr->cap_orig - thermal_load_avg(rq);

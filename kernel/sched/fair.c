@@ -12610,6 +12610,24 @@ static inline void *select_task_rq_fair_dummy(void)
 #define select_task_rq_fair cass_select_task_rq_fair
 #endif /* CONFIG_SCHED_CASS */
 
+#ifdef CONFIG_SMP
+/*
+ * sched_class::select_task_rq(p, task_cpu, sd_flag, flags)
+ * vs
+ * cass_select_task_rq_fair(p, prev_cpu, sd_flag, wake_flags, sibling_count_hint)
+ *
+ * We need an adapter if we are using CASS, because the function signatures differ.
+ * The standard select_task_rq takes 4 arguments.
+ * cass_select_task_rq_fair takes 5 arguments.
+ */
+static int select_task_rq_fair_adapter(struct task_struct *p, int task_cpu, int sd_flag, int flags)
+{
+    return cass_select_task_rq_fair(p, task_cpu, sd_flag, flags, 0);
+}
+#undef select_task_rq_fair
+#define select_task_rq_fair select_task_rq_fair_adapter
+#endif
+
 /*
  * All the scheduling class methods:
  */

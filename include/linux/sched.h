@@ -286,7 +286,7 @@ enum uclamp_id {
 	UCLAMP_MIN = 0,
 	UCLAMP_MAX,
 	UCLAMP_CNT
-}
+};
 
 struct sched_param {
 	int sched_priority;

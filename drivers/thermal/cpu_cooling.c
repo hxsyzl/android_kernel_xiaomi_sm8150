@@ -646,7 +646,6 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 	} else {
 		cpufreq_update_policy(cpu);
 	}
-#endif
 
 	return 0;
 }

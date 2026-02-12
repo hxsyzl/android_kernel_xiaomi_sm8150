@@ -6420,6 +6420,8 @@ int smblib_set_prop_typec_power_role(struct smb_charger *chg,
 	}
 
 	chg->power_role = val->intval;
+unlock:
+	spin_unlock(&chg->typec_pr_lock);
 	return rc;
 }
 

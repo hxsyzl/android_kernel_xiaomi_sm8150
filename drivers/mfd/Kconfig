@@ -1830,7 +1830,7 @@ config MFD_VEXPRESS_SYSREG
 	  on the ARM Ltd. Versatile Express board.
 
 config MFD_SPK_ID
-	bool "Versatile Express System Registers"
+	bool "Xiaomi Speaker ID Driver"
 	help
 	  Xiaomi speaker ID driver.
 

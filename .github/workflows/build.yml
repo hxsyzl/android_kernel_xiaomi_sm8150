@@ -74,8 +74,9 @@ jobs:
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/Image.gz $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/dtb $HOME/AnyKernel3/
 
           # Determine branch name and commit hash (first 6 characters)
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')

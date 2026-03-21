@@ -69,6 +69,8 @@
 #define SEGMENT_SIZE(sbi)	(1ULL << ((sbi)->log_blocksize +	\
 					(sbi)->log_blocks_per_seg))
 
+#define CAP_BLKS_PER_SEC(sbi)	((sbi)->blocks_per_seg * (sbi)->segs_per_sec)
+
 #define START_BLOCK(sbi, segno)	(SEG0_BLKADDR(sbi) +			\
 	 (GET_R2L_SEGNO(FREE_I(sbi), segno) << (sbi)->log_blocks_per_seg))
 
@@ -135,7 +137,8 @@ enum {
  */
 enum {
 	LFS = 0,
-	SSR
+	SSR,
+	AT_SSR,
 };
 
 /*
@@ -146,6 +149,7 @@ enum {
 enum {
 	GC_CB = 0,
 	GC_GREEDY,
+	GC_AT,
 	ALLOC_NEXT,
 	FLUSH_DEVICE,
 	MAX_GC_POLICY,
@@ -167,11 +171,16 @@ struct victim_sel_policy {
 	int alloc_mode;			/* LFS or SSR */
 	int gc_mode;			/* GC_CB or GC_GREEDY */
 	unsigned long *dirty_segmap;	/* dirty segment bitmap */
+	unsigned long *dirty_bitmap;	/* dirty segment/section bitmap */
 	unsigned int max_search;	/* maximum # of segments to search */
 	unsigned int offset;		/* last scanned bitmap offset */
 	unsigned int ofs_unit;		/* bitmap search unit */
 	unsigned int min_cost;		/* minimum cost */
+	unsigned long long oldest_age;	/* oldest age for equal-cost victims */
 	unsigned int min_segno;		/* segment # having min. cost */
+	unsigned long long age;		/* mtime of GCed section */
+	unsigned long long age_threshold;/* age threshold */
+	bool one_time_gc;		/* one time GC */
 };
 
 struct seg_entry {
@@ -237,6 +246,8 @@ struct sit_info {
 	unsigned long long mounted_time;	/* mount time */
 	unsigned long long min_mtime;		/* min. modification time */
 	unsigned long long max_mtime;		/* max. modification time */
+	unsigned long long dirty_min_mtime;	/* min. dirty candidate mtime */
+	unsigned long long dirty_max_mtime;	/* max. dirty candidate mtime */
 
 	unsigned int last_victim[MAX_GC_POLICY]; /* last victim segment # */
 };
@@ -266,9 +277,13 @@ enum dirty_type {
 struct dirty_seglist_info {
 	const struct victim_selection *v_ops;	/* victim selction operation */
 	unsigned long *dirty_segmap[NR_DIRTY_TYPE];
+	unsigned long *dirty_secmap;		/* dirty section bitmap */
 	struct mutex seglist_lock;		/* lock for segment bitmaps */
 	int nr_dirty[NR_DIRTY_TYPE];		/* # of dirty segments */
 	unsigned long *victim_secmap;		/* background GC victims */
+	unsigned long *pinned_secmap;		/* pinned victims from fg GC */
+	unsigned int pinned_secmap_cnt;		/* pinned section count */
+	bool enable_pin_section;		/* allow section pinning */
 };
 
 /* victim selection function for cleaning and SSR */

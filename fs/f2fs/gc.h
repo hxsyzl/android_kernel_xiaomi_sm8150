@@ -18,6 +18,12 @@
 #define LIMIT_FREE_BLOCK	40 /* percentage over invalid + free space */
 
 #define DEF_GC_FAILED_PINNED_FILES	2048
+/* choose candidates from sections which has age of more than 7 days */
+#define DEF_GC_THREAD_AGE_THRESHOLD		(60 * 60 * 24 * 7)
+#define DEF_GC_THREAD_CANDIDATE_RATIO		20
+#define DEF_GC_THREAD_MAX_CANDIDATE_COUNT	10
+#define DEF_GC_THREAD_AGE_WEIGHT		60
+#define DEFAULT_ACCURACY_CLASS			10000
 
 /* Search max. number of dirty segments to select a victim segment */
 #define DEF_MAX_VICTIM_SEARCH 4096 /* covers 8GB */
@@ -47,6 +53,7 @@ struct victim_entry {
 	unsigned int segno;		/* segment No. */
 	struct list_head list;
 } __packed;
+
 /*
  * inline functions
  */

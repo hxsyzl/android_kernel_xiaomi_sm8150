@@ -24,6 +24,7 @@
 #include <linux/sysfs.h>
 #include <linux/quota.h>
 #include <linux/unicode.h>
+#include <linux/zstd.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -36,6 +37,16 @@
 #include <trace/events/f2fs.h>
 
 static struct kmem_cache *f2fs_inode_cachep;
+
+static inline __kernel_fsid_t f2fs_u64_to_fsid(u64 val)
+{
+	__kernel_fsid_t fsid = {
+		.val[0] = (u32)val,
+		.val[1] = (u32)(val >> 32),
+	};
+
+	return fsid;
+}
 
 #ifdef CONFIG_F2FS_FAULT_INJECTION
 
@@ -1500,7 +1511,7 @@ static int f2fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	}
 
 	buf->f_namelen = F2FS_NAME_LEN;
-	buf->f_fsid    = u64_to_fsid(id);
+	buf->f_fsid    = f2fs_u64_to_fsid(id);
 
 #ifdef CONFIG_QUOTA
 	if (is_inode_flag_set(dentry->d_inode, FI_PROJ_INHERIT) &&

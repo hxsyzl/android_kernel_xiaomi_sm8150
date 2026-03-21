@@ -23,6 +23,8 @@
 #include "gc.h"
 #include <trace/events/f2fs.h>
 
+static struct kmem_cache *victim_entry_slab;
+
 static int gc_thread_func(void *data)
 {
 	struct f2fs_sb_info *sbi = data;
@@ -362,7 +364,7 @@ static struct victim_entry *__create_victim_entry(struct f2fs_sb_info *sbi,
 	struct atgc_management *am = &sbi->am;
 	struct victim_entry *ve;
 
-	ve =  f2fs_kmem_cache_alloc(victim_entry_slab, GFP_NOFS, true, NULL);
+	ve = f2fs_kmem_cache_alloc(victim_entry_slab, GFP_NOFS);
 
 	ve->mtime = mtime;
 	ve->segno = segno;

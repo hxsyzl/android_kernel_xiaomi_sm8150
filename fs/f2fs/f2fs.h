@@ -98,6 +98,8 @@ extern const char *f2fs_fault_name[FAULT_MAX];
 #define F2FS_MOUNT_RESERVE_ROOT		0x01000000
 #define F2FS_MOUNT_DISABLE_CHECKPOINT	0x02000000
 #define F2FS_MOUNT_NORECOVERY		0x04000000
+#define F2FS_MOUNT_ATGC			0x08000000
+#define F2FS_MOUNT_GC_MERGE		0x10000000
 
 #define F2FS_OPTION(sbi)	((sbi)->mount_opt)
 #define clear_opt(sbi, option)	(F2FS_OPTION(sbi).opt &= ~F2FS_MOUNT_##option)
@@ -138,6 +140,7 @@ struct f2fs_mount_info {
 	int fsync_mode;			/* fsync policy */
 	int fs_mode;			/* fs mode: LFS or ADAPTIVE */
 	int bggc_mode;			/* bggc mode: off, on or sync */
+	int memory_mode;		/* memory mode */
 	struct fscrypt_dummy_context dummy_enc_ctx; /* test dummy encryption */
 #ifdef CONFIG_FS_ENCRYPTION
 	bool inlinecrypt;		/* inline encryption enabled */
@@ -150,6 +153,7 @@ struct f2fs_mount_info {
 	/* For compression */
 	unsigned char compress_algorithm;	/* algorithm type */
 	unsigned compress_log_size;		/* cluster log size */
+	unsigned char compress_level;		/* compress level */
 	unsigned char compress_ext_cnt;		/* extension count */
 	unsigned char extensions[COMPRESS_EXT_NUM][F2FS_EXTENSION_LEN];	/* extensions */
 };
@@ -351,6 +355,17 @@ struct discard_cmd_control {
 	atomic_t discard_cmd_cnt;		/* # of cached cmd count */
 	struct rb_root_cached root;		/* root of discard rb-tree */
 	bool rbtree_check;			/* config for consistence check */
+};
+
+struct atgc_management {
+	bool atgc_enabled;		/* age threshold GC enabled */
+	struct rb_root_cached root;	/* age-sorted victim tree */
+	struct list_head victim_list;	/* allocated victim entries */
+	unsigned int victim_count;	/* number of victim entries */
+	unsigned int candidate_ratio;	/* oldest victim candidate ratio */
+	unsigned int max_candidate_count; /* max candidate count */
+	unsigned int age_weight;	/* weight for age in cost */
+	unsigned long long age_threshold; /* minimum age threshold */
 };
 
 /* for the list of fsync inodes, used only during recovery */
@@ -1294,6 +1309,11 @@ enum fsync_mode {
 	FSYNC_MODE_NOBARRIER,	/* fsync behaves nobarrier based on posix */
 };
 
+enum {
+	MEMORY_MODE_NORMAL,	/* normal memory footprint */
+	MEMORY_MODE_LOW,	/* lower memory footprint */
+};
+
 /*
  * this value is set in page as a private data which indicate that
  * the page is atomically written, and it is in inmem_pages list.
@@ -1504,6 +1524,7 @@ struct f2fs_sb_info {
 	unsigned int cur_victim_sec;		/* current victim section num */
 	unsigned int gc_mode;			/* current GC state */
 	unsigned int next_victim_seg[2];	/* next segment in victim section */
+	struct atgc_management am;		/* age-threshold GC state */
 	/* for skip statistic */
 	unsigned int atomic_files;              /* # of opened atomic file */
 	unsigned long long skipped_atomic_files[2];	/* FG_GC and BG_GC */

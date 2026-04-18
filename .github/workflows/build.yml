@@ -63,8 +63,8 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
           # Use ccache explicitly
-          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out raphael_defconfig
-          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out -j$(grep -c ^processor /proc/cpuinfo) 
+          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out LD=ld.lld raphael_defconfig
+          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out LD=ld.lld -j$(grep -c ^processor /proc/cpuinfo) 
           # Show ccache stats after build
           ccache --show-stats
           ccache --show-config

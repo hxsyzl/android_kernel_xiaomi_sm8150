@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       KBUILD_BUILD_USER: Hxsyzl
       KBUILD_BUILD_HOST: Ubuntu
@@ -63,9 +63,8 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
           # Use ccache explicitly
-          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out  LLVM=1 LLVM_IAS=1 LD=ld.lld raphael_defconfig
-          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out -j$(grep -c ^processor /proc/cpuinfo) LLVM=1 LLVM_IAS=1 LD=ld.lld
-
+          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out raphael_defconfig
+          make CC="ccache clang" AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip O=out -j$(grep -c ^processor /proc/cpuinfo) 
           # Show ccache stats after build
           ccache --show-stats
           ccache --show-config

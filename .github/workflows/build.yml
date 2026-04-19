@@ -72,8 +72,8 @@ jobs:
 
       - name: Repack Kernel Artifacts
         run: |
-          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          cp out/arch/arm64/boot/Image $HOME/AnyKernel3/
+          git clone --depth=1 https://github.com/Helium-Studio/AnyKernel3.git $HOME/AnyKernel3
+          cp out/arch/arm64/boot/Image.gz $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtb $HOME/AnyKernel3/
 
